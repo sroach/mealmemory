@@ -33,6 +33,9 @@ kotlin {
         androidMain.dependencies {
             implementation(compose.preview)
             implementation(libs.androidx.activity.compose)
+            // Ktor Android engine
+            implementation("io.ktor:ktor-client-android:2.3.7")
+
         }
         commonMain.dependencies {
             implementation(compose.runtime)
@@ -49,7 +52,22 @@ kotlin {
             implementation(libs.material.icons.extended)
 
             implementation(libs.kotlinx.datetime)
+
+            // Add Ktor for HTTP client
+            implementation("io.ktor:ktor-client-core:2.3.7")
+            implementation("io.ktor:ktor-client-content-negotiation:2.3.7")
+            implementation("io.ktor:ktor-serialization-kotlinx-json:2.3.7")
+            implementation("io.ktor:ktor-client-logging:2.3.7")
+
+            // Serialization
+            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
+
         }
+        iosMain.dependencies {
+            // Ktor iOS engine
+            implementation("io.ktor:ktor-client-darwin:2.3.7")
+        }
+
         commonTest.dependencies {
             implementation(libs.kotlin.test)
         }

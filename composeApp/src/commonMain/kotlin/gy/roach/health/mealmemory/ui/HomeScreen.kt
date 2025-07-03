@@ -22,10 +22,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.jetbrains.compose.resources.painterResource
+import gy.roach.health.mealmemory.camera.CameraManager
 import gy.roach.health.mealmemory.data.Feeling
 import gy.roach.health.mealmemory.data.Meal
 import gy.roach.health.mealmemory.data.MealRepository
+import gy.roach.health.mealmemory.network.MealNetworkRepository
 import gy.roach.health.mealmemory.ui.components.*
+import kotlinx.coroutines.launch
 import mealmemory.composeapp.generated.resources.Res
 import mealmemory.composeapp.generated.resources.compose_multiplatform
 
@@ -94,14 +97,16 @@ fun HomeScreen(
                 }
             }
 
-            // iOS-style Floating Action Button
-            IOSFloatingActionButton(
-                onClick = onAddMeal,
+            // Camera UI with error handling
+            Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(16.dp)
             ) {
-                Icon(Icons.Default.Add, contentDescription = "Add Meal")
+                MealScreenWithErrorHandling(
+                    mealRepository = mealRepository,
+                    onPhotoTaken = onAddMeal
+                )
             }
         }
 
@@ -233,4 +238,105 @@ fun IOSFeelingActionSheet(
         onDismiss = onDismiss,
         actions = actions
     )
+}
+
+@Composable
+fun MealScreenWithErrorHandling(
+    mealRepository: MealRepository,
+    onPhotoTaken: () -> Unit = {}
+) {
+    val cameraManager = remember { CameraManager() }
+    val mealNetworkRepository = remember { MealNetworkRepository() }
+    val coroutineScope = rememberCoroutineScope()
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    val handleCameraResult: (String?) -> Unit = { photoPath ->
+        photoPath?.let { path ->
+            // Launch a coroutine to upload the photo to the API
+            coroutineScope.launch {
+                isLoading = true
+                mealNetworkRepository.uploadMealWithPhoto(path)
+                    .onSuccess { meal ->
+                        // Add the meal from the API response to the local repository
+                        mealRepository.addMeal(meal.photoPath, meal.feeling)
+                        errorMessage = null
+                        onPhotoTaken()
+                    }
+                    .onFailure { error ->
+                        errorMessage = "Failed to upload: ${error.message}"
+                        // Fallback to local storage if API fails
+                        mealRepository.addMeal(path)
+                    }
+                isLoading = false
+            }
+        } ?: run {
+            errorMessage = "Failed to capture photo"
+            isLoading = false
+        }
+    }
+
+    val takePicture: () -> Unit = {
+        isLoading = true
+
+        // Set a timeout to reset isLoading if the callback is not invoked
+        val timeoutJob = coroutineScope.launch {
+            kotlinx.coroutines.delay(30000) // 30 seconds timeout
+            if (isLoading) {
+                println("Camera operation timed out")
+                errorMessage = "Camera operation timed out"
+                isLoading = false
+            }
+        }
+
+        try {
+            cameraManager.takePhoto { photoPath ->
+                // Cancel the timeout job since we got a response
+                timeoutJob.cancel()
+
+                println("path is $photoPath")
+                // Handle the camera result, which will manage isLoading state
+                handleCameraResult(photoPath)
+            }
+        } catch (e: Exception) {
+            // If there's an exception during camera operation, reset loading state
+            timeoutJob.cancel() // Cancel the timeout job
+            println("Camera operation failed: ${e.message}")
+            errorMessage = "Camera operation failed: ${e.message}"
+            isLoading = false
+        }
+    }
+
+    val handleAddMeal: () -> Unit = {
+        if (!cameraManager.hasPermission()) {
+            cameraManager.requestPermission { granted ->
+                if (granted) {
+                    takePicture()
+                } else {
+                    errorMessage = "Camera permission required"
+                }
+            }
+        } else {
+            takePicture()
+        }
+    }
+
+    Button(
+        onClick = handleAddMeal,
+        enabled = !isLoading
+    ) {
+        if (isLoading) {
+            CircularProgressIndicator(modifier = Modifier.size(16.dp))
+        } else {
+            Text("Take Photo")
+        }
+    }
+
+    errorMessage?.let { message ->
+        Text(
+            text = message,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.padding(8.dp)
+        )
+    }
 }
